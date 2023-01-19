@@ -1,94 +1,67 @@
-import SymblTwilioConnector from "../../../utils/symbl/SymblTwilioConnector";
 import {useCallback, useState} from 'react';
-import SymblWebSocketAPI from "../../../utils/symbl/SymblWebSocketAPI";
+import {Symbl} from '@symblai/symbl-web-sdk';
 
-export default function useSymbl(onError, onResult, options) {
+const appId = "";
+const appSecret = "";
+
+export default function useSymbl(onError) {
     const [isStarting, setIsStarting] = useState(false);
-    const [connectionId, setConnectionId] = useState('');
     const [isConnected, setIsConnected] = useState(false);
     const [isMute, setIsMuted] = useState(false);
     const [startedTime, setStartedTime] = useState(null);
-
-    const startSymbl = useCallback(
-        (roomName, email) => {
-            console.log(roomName, email)
-            setIsStarting(true);
-            window.connector = new SymblTwilioConnector({
-                callback: onResult,
-                roomName
-            });
-            return window.connector.startSymblConnector(email)
-                .then(response => {
-                    console.log('Symbl Started. ', response);
-                    if (response && response.connectionId) {
-                        console.log('Subscribing')
-                        window.connector.subscribe()
-                        console.log('Subscribed to Symbl')
-                        setConnectionId(response.connectionId);
-                        console.log('ConnectionId: ', connectionId);
-                        setIsConnected(true);
-                    } else {
-                        onError("Symbl couldn't be started.");
-                    }
-                    setIsStarting(false);
-                }).catch(err => {
-                onError(err);
-                    setIsStarting(false);
-            });
-        },
-        [onError, onResult, connectionId]
-    );
-
-    const stopSymbl = useCallback(async (connectionId) => {
-        console.log('Stop symbl called for connectionId: ', connectionId, window.connector);
-        if (window.connector) {
-            console.log('Stopping Symbl: ', connectionId);
-            try {
-                const response = await window.connector.stopSymbl(connectionId)
-                if (response && response.connectionId) {
-                    console.log('Connection Stopped: ', response.connectionId);
-                } else {
-                    onError("Symbl couldn't be stopped.");
-                }
-                setIsConnected(false);
-            } catch(err) {
-                onError(err);
-            }
-        }
-    }, [onError]);
 
     const startSymblWebSocketApi = useCallback(
         async (handlers, options) => {
             if (isStarting) {
                 console.log('Another connection already starting. Returning');
             }
-            setIsStarting(true);
-            window.websocketApi = new SymblWebSocketAPI('en-US',
-                handlers, options);
-                // {
-                //     participants,
-                //     localParticipant,
-                //     meetingId,
-                //     meetingTitle
-                // });
-            try {
-                await window.websocketApi.openConnectionAndStart();
-                setStartedTime(new Date().toISOString());
-                setIsConnected(true);
-                setIsStarting(false);
-            } catch (err) {
-                onError(err);
-                setIsStarting(false);
+            else {
+                setIsStarting(true);
+                const symbl = new Symbl({
+                    appId: appId,
+                    appSecret: appSecret
+                });
+                try {
+                    console.log("Trying to create new connection");
+                    window.connection = await symbl.createConnection();
+                    console.log("Trying to start processing.");
+                    await window.connection.startProcessing({
+                        id: options.meetingId,
+                        config: {
+                            confidenceThreshold: 0.5,
+                            meetingTitle: options.meetingTitle,
+                            encoding: "OPUS" // Encoding can be "LINEAR16" or "OPUS"
+                        },
+                        speaker: {
+                            userId: options.localParticipant && options.localParticipant.email,
+                            name: options.localParticipant && options.localParticipant.name
+                        }
+                    });
+                    setStartedTime(new Date().toISOString());
+                    setIsConnected(true);
+                    setIsStarting(false);
+
+                    window.connection.on("speech_recognition", (speechData) => {
+                        handlers.onSpeechDetected(speechData);
+                    });
+                    window.connection.on("message", (messageData) => {
+                        handlers.onMessageResponse(messageData);
+                    })
+                } catch (err) {
+                    console.log("I ran into an error");
+                    onError(err);
+                    setIsStarting(false);
+                }
             }
         },
-        [onError]
+        [isStarting, onError]
     );
 
     const stopSymblWebSocketApi = useCallback(
         async (callback) => {
-            if (window.websocketApi) {
+            if (window.connection) {
                 try {
-                    await window.websocketApi.stop(callback)
+                    await window.connection.stopProcessing()
                     setIsConnected(false);
                 } catch (err) {
                     onError(err);
@@ -99,10 +72,9 @@ export default function useSymbl(onError, onResult, options) {
     );
 
     const muteSymbl = useCallback(
-        () => {
-            if (window.websocketApi) {
+        async () => {
+            if (window.connection) {
                 try {
-                    window.websocketApi.mute()
                     setIsMuted(true);
                 } catch (err) {
                     onError(err);
@@ -113,10 +85,9 @@ export default function useSymbl(onError, onResult, options) {
     );
 
     const unMuteSymbl = useCallback(
-        () => {
-            if (window.websocketApi) {
+        async () => {
+            if (window.connection) {
                 try {
-                    window.websocketApi.unmute()
                     setIsMuted(false);
                 } catch (err) {
                     onError(err);
@@ -129,9 +100,6 @@ export default function useSymbl(onError, onResult, options) {
     return {
         isConnected,
         isStarting,
-        connectionId,
-        startSymbl,
-        stopSymbl,
         startSymblWebSocketApi,
         stopSymblWebSocketApi,
         muteSymbl,

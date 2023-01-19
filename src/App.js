@@ -49,7 +49,7 @@ function App() {
                 });
             }
         }
-    }, [roomName, userName, room]);
+    }, [roomName, userName, room, roomState, hasStarted, isStarting, getToken, connect]);
 
 
     return (
